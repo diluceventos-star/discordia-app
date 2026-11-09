@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0D0D0D">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Discordia Barber</title>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0D0D0D;--c1:#1A1A1A;--c2:#262626;--g:#F5A300;--g2:#FFB800;--t:#F5F5F5;--m:#A0A0A0;--ok:#3DDC84;--bad:#FF5C5C;color-scheme:dark}
+*{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--bg);color:var(--t);font:16px/1.4 Inter,system-ui,sans-serif;padding-top:env(safe-area-inset-top)}
+#app{max-width:520px;margin:auto;padding:16px 16px 120px}
+h2{font:400 28px Anton,Impact,sans-serif;letter-spacing:.5px}
+h3{font-size:15px;margin:2px 0 10px}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer}
+input{width:100%;background:var(--c2);border:1px solid #333;border-radius:12px;padding:13px;outline:none;margin-bottom:8px}
+input:focus,button:focus-visible{border-color:var(--g);outline:2px solid var(--g)}
+.card{background:var(--c1);border-radius:16px;padding:14px;margin-bottom:12px}
+.row{display:flex;gap:8px;align-items:center}.row>*{flex:1}
+.btn{border:0;border-radius:14px;padding:15px;font-weight:800;background:linear-gradient(135deg,var(--g),var(--g2));color:#111;width:100%}
+.opt{background:var(--c2);border:1.5px solid #333;border-radius:14px;padding:13px 8px;font-weight:600;text-align:center;width:100%;margin-bottom:8px}
+.opt.on{border-color:var(--g);background:#3a2a00;color:var(--g2)}
+.ghost{background:none;border:1px solid #444;border-radius:10px;padding:7px 10px;color:var(--m);flex:0 0 auto}
+.sub{color:var(--m);font-size:13px}.bad{color:var(--bad)}.ok{color:var(--ok)}
+.big{font:400 32px Anton,Impact,sans-serif;color:var(--g2)}
+table{width:100%;border-collapse:collapse;font-size:14px}td,th{padding:8px 4px;text-align:left;border-bottom:1px solid #2a2a2a}
+th{color:var(--m);font-weight:600}.r{text-align:right}
+nav{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom));display:flex;gap:4px;background:rgba(30,30,30,.92);backdrop-filter:blur(12px);border:1px solid #333;border-radius:999px;padding:6px;box-shadow:0 8px 30px #000a;z-index:5}
+nav button{background:none;border:0;padding:11px 18px;border-radius:999px;color:var(--m);font-weight:600}
+nav button.on{background:var(--g);color:#111}
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom));background:#2d2d2d;border:1px solid var(--g);padding:11px 16px;border-radius:14px;z-index:20;display:flex;gap:12px;align-items:center;max-width:92vw}
+#toast.bad{border-color:var(--bad)}
+#toast button{background:none;border:0;color:var(--g2);font-weight:800}
+.modal{position:fixed;inset:0;background:#000c;display:flex;align-items:flex-end;justify-content:center;z-index:30}
+.modal>div{background:var(--c1);width:100%;max-width:520px;border-radius:22px 22px 0 0;padding:18px 18px calc(18px + env(safe-area-inset-bottom))}
+summary{font-weight:600;cursor:pointer;padding:2px 0}
+a{color:var(--g2)}
+[hidden]{display:none!important}
+@media(prefers-reduced-motion:no-preference){.card{animation:in .25s ease-out}@keyframes in{from{opacity:.4;transform:translateY(6px)}}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<nav id="nav" hidden>
+  <button data-a="tab" data-v="reg">Registrar</button>
+  <button data-a="tab" data-v="cli">Clientes</button>
+  <button data-a="tab" data-v="res">Resumen</button>
+</nav>
+<div id="toast" hidden></div>
+<script>
+const API = 'https://script.google.com/macros/s/AKfycbxnPRxri-mZ4JfkhRNOoCLBEmHg8AC0ObEJ7RP-PYwKk3oU-_P1lpxAVXlJSrGgYpxPdg/exec';
+const $ = s => document.querySelector(s);
+const money = n => '$' + Math.round(Number(n) || 0).toLocaleString('es-AR');
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const hoy = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Argentina/Buenos_Aires' });
+const sum = (a, f) => a.reduce((x, y) => x + Number(f(y)), 0);
+let S = { t: localStorage.getItem('t'), me: null, d: null, tab: 'reg', svc: null, cli: null, met: null, precio: '', per: 'hoy', q: '', A: [] };
+
+async function api(a, p = {}) {
+  const r = await fetch(API, { method: 'POST', body: JSON.stringify({ a, t: S.t, ...p }) });
+  const j = await r.json();
+  if (j.error === 'SESION') { out(); throw new Error('La sesión venció. Ingresá de nuevo.'); }
+  if (!j.ok) throw new Error(j.error);
+  return j;
+}
+async function run(f) { try { return await f(); } catch (e) { toast(e.message, 0, 1); } }
+function toast(m, undo, err) {
+  const t = $('#toast'); toast.u = undo;
+  t.innerHTML = esc(m) + (undo ? ' <button data-a="undo">Deshacer</button>' : '');
+  t.className = err ? 'bad' : ''; t.hidden = false;
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, undo ? 8000 : 3000);
+}
+function out() { localStorage.removeItem('t'); S.t = null; S.d = null; loginView(); }
+
+/* ---------- Login ---------- */
+function loginView() {
+  $('#nav').hidden = true;
+  $('#app').innerHTML = `<div style="text-align:center;padding-top:5vh"><img src="logo.png" alt="Discordia Barber" style="width:82%;max-width:320px"></div>
+  <div class="card" style="margin-top:24px"><input id="dni" inputmode="numeric" placeholder="DNI" autocomplete="username">
+  <input id="pw" type="password" placeholder="Contraseña" autocomplete="current-password">
+  <button class="btn" data-a="login">Ingresar</button></div>`;
+}
+const H = {};
+H.login = () => run(async () => {
+  const j = await api('login', { dni: $('#dni').value, p: $('#pw').value });
+  S.t = j.t; localStorage.setItem('t', j.t); await start();
+});
+H.out = out;
+async function start() {
+  const j = await api('init'); S.me = j.me; S.d = j; render();
+}
+
+/* ---------- Estructura ---------- */
+function render() {
+  $('#nav').hidden = false;
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.v === S.tab));
+  ({ reg: regView, cli: cliView, res: resView })[S.tab]();
+}
+function head(t) {
+  return `<div class="row" style="margin-bottom:12px"><div><h2>${t}</h2><div class="sub">${esc(S.me.nombre)} ${esc(S.me.apellido)}${S.me.rol === 'admin' ? ' · Dueño' : ''}</div></div><button class="ghost" data-a="out">Salir</button></div>`;
+}
+H.tab = d => { S.tab = d.v; S.q = ''; render(); };
+
+/* ---------- Registrar ---------- */
+function regView() {
+  const d = S.d;
+  $('#app').innerHTML = head('Registrar corte') + `
+  <div class="card"><h3>Servicio</h3><div class="row">${d.servicios.map(s =>
+    `<button class="opt ${S.svc?.id === s.id ? 'on' : ''}" data-a="svc" data-id="${s.id}">${esc(s.nombre)}<br>${money(s.precio)}</button>`).join('')}</div>
+  <h3>Precio cobrado</h3><input id="precio" inputmode="numeric" value="${esc(S.precio)}" placeholder="Precio"></div>
+  <div class="card"><h3>Cliente</h3>${S.cli
+    ? `<div class="row"><b>${esc(S.cli.nombre)} ${esc(S.cli.apellido)}</b><button class="ghost" data-a="clr">Cambiar</button></div>`
+    : `<input id="q" placeholder="Buscar por nombre o apellido" autocomplete="off"><div id="res"></div>
+       <button class="opt" data-a="newcli">+ Nuevo cliente</button>`}</div>
+  <div class="card"><h3>Pago</h3><div class="row">${['Efectivo', 'Transferencia'].map(m =>
+    `<button class="opt ${S.met === m ? 'on' : ''}" data-a="met" data-v="${m}">${m}</button>`).join('')}</div></div>
+  <button class="btn" data-a="save">Guardar corte</button>
+  <details class="card" style="margin-top:14px"><summary>Consumo de la heladera</summary><div class="row" style="flex-wrap:wrap;margin-top:10px">${d.productos.map(p =>
+    `<button class="opt" style="flex:1 1 40%" data-a="prod" data-id="${p.id}">${esc(p.nombre)}<br>${money(p.precio)}</button>`).join('')}</div></details>`;
+  pintar();
+}
+H.svc = d => { S.svc = S.d.servicios.find(s => s.id === d.id); S.precio = S.svc.precio; regView(); };
+H.met = d => { S.met = d.v; regView(); };
+H.clr = () => { S.cli = null; regView(); };
+H.cli = d => { S.cli = S.d.clientes.find(c => c.id === d.id); S.q = ''; regView(); };
+H.save = () => run(async () => {
+  if (!S.svc) throw new Error('Elegí el servicio');
+  if (!S.cli) throw new Error('Elegí o creá un cliente');
+  if (!S.met) throw new Error('Elegí el método de pago');
+  const j = await api('atencion', { servicio: S.svc.id, clienteId: S.cli.id, precio: S.precio, metodo: S.met });
+  toast('Corte guardado', j.a.id);
+  S.svc = S.cli = S.met = null; S.precio = ''; regView();
+});
+H.undo = () => run(async () => { await api('anular', { id: toast.u }); toast('Corte anulado'); });
+H.prod = d => run(async () => { await api('consumo', { producto: d.id, cant: 1 }); toast('Consumo anotado'); });
+
+/* ---------- Clientes ---------- */
+function pintar() {
+  const r = $('#res'); if (!r) return;
+  const q = S.q.toLowerCase().trim(), adm = S.me.rol === 'admin';
+  const L = S.d.clientes.filter(c => !q || (c.nombre + ' ' + c.apellido).toLowerCase().includes(q));
+  if (S.tab === 'reg') {
+    r.innerHTML = q ? L.slice(0, 6).map(c => `<button class="opt" data-a="cli" data-id="${c.id}">${esc(c.nombre)} ${esc(c.apellido)}</button>`).join('') : '';
+  } else {
+    r.innerHTML = L.length ? L.map(c => `<div class="card"><b>${esc(c.nombre)} ${esc(c.apellido)}</b>${adm ? `
+      <div class="sub">${esc(c.telefono)} · <a href="https://wa.me/549${String(c.telefono).replace(/^0+/, '')}" target="_blank" rel="noopener">WhatsApp</a>${c.instagram ? ` · <a href="https://instagram.com/${esc(String(c.instagram).replace('@', ''))}" target="_blank" rel="noopener">${esc(c.instagram)}</a>` : ''}</div>` : ''}</div>`).join('')
+      : '<p class="sub">Todavía no hay clientes. Sumá el primero con Nuevo cliente.</p>';
+  }
+}
+function cliView() {
+  $('#app').innerHTML = head('Clientes') + `<input id="q" placeholder="Buscar cliente" autocomplete="off"><button class="btn" data-a="newcli" style="margin-bottom:12px">+ Nuevo cliente</button><div id="res"></div>`;
+  pintar();
+}
+H.newcli = () => {
+  const m = document.createElement('div'); m.className = 'modal'; m.id = 'modal';
+  m.innerHTML = `<div><h2 style="margin-bottom:12px">Nuevo cliente</h2>
+  <input id="n1" placeholder="Nombre"><input id="n2" placeholder="Apellido">
+  <input id="n3" inputmode="tel" placeholder="Teléfono (código de área + número, sin 0 ni 15)">
+  <input id="n4" placeholder="Instagram (opcional)">
+  <div class="row"><button class="ghost" data-a="closem" style="padding:15px">Cancelar</button><button class="btn" data-a="savecli">Guardar cliente</button></div></div>`;
+  document.body.append(m); $('#n1').focus();
+};
+H.closem = () => $('#modal')?.remove();
+H.savecli = () => run(async () => {
+  const j = await api('cliente', { nombre: $('#n1').value, apellido: $('#n2').value, telefono: $('#n3').value, instagram: $('#n4').value });
+  if (!S.d.clientes.find(c => c.id === j.c.id)) S.d.clientes.push(j.c);
+  H.closem(); toast(j.dup ? 'Ese teléfono ya estaba cargado' : 'Cliente guardado');
+  if (S.tab === 'reg') S.cli = j.c;
+  render();
+});
+
+/* ---------- Resumen ---------- */
+async function resView() {
+  const adm = S.me.rol === 'admin', h = hoy();
+  const per = `<div class="row" style="margin-bottom:12px">${[['hoy', 'Hoy'], ['mes', 'Mes'], ['anio', 'Año']].map(([v, l]) =>
+    `<button class="opt ${S.per === v ? 'on' : ''}" data-a="per" data-v="${v}" style="margin:0">${l}</button>`).join('')}</div>`;
+  $('#app').innerHTML = head('Resumen') + per + '<p class="sub">Cargando…</p>';
+  const desde = S.per === 'hoy' ? h : S.per === 'mes' ? h.slice(0, 8) + '01' : h.slice(0, 4) + '-01-01';
+  const j = await run(() => api('datos', { desde, hasta: h })); if (!j) return;
+  const A = j.atenciones.filter(a => a.anulada !== 'si'), C = j.consumos; S.A = A;
+  const cons = c => Number(c.cant) * Number(c.precio);
+  const fact = sum(A, a => a.precioCobrado), gb = sum(A, a => a.gBarbero), gc = sum(A, a => a.gCasa);
+  const efe = sum(A.filter(a => a.metodo === 'Efectivo'), a => a.precioCobrado);
+  const desc = sum(C.filter(c => c.descontar === 'si'), cons), pend = sum(C.filter(c => c.estado === 'pendiente'), cons);
+  let html = head('Resumen') + per + `
+  <div class="card"><div class="sub">Facturado · ${A.length} ${A.length === 1 ? 'corte' : 'cortes'}</div><div class="big">${money(fact)}</div>
+  <div class="row sub" style="margin-top:6px"><span>Efectivo ${money(efe)}</span><span>Transferencia ${money(fact - efe)}</span></div></div>
+  <div class="card"><h3>${adm ? 'Reparto' : 'Mi ganancia'}</h3><table>
+  <tr><td>${adm ? 'Barberos (bruto)' : 'Ganancia bruta'}</td><td class="r">${money(gb)}</td></tr>
+  <tr><td>Consumos descontados</td><td class="r bad">− ${money(desc)}</td></tr>
+  <tr><td><b>${adm ? 'Barberos (neto)' : 'Ganancia neta'}</b></td><td class="r ok"><b>${money(gb - desc)}</b></td></tr>
+  ${adm ? `<tr><td>Casa</td><td class="r">${money(gc + desc)}</td></tr>` : ''}
+  <tr><td class="sub">Consumos sin confirmar</td><td class="r sub">${money(pend)}</td></tr></table></div>`;
+  if (adm) {
+    const by = {};
+    A.forEach(a => { const o = by[a.dni] ??= { n: a.barbero, c: 0, f: 0, g: 0, d: 0 }; o.c++; o.f += Number(a.precioCobrado); o.g += Number(a.gBarbero); });
+    C.filter(c => c.descontar === 'si').forEach(c => { (by[c.dni] ??= { n: c.barbero, c: 0, f: 0, g: 0, d: 0 }).d += cons(c); });
+    html += `<div class="card"><h3>Por barbero</h3><table><tr><th>Barbero</th><th class="r">Cortes</th><th class="r">Factura</th><th class="r">Neto</th></tr>${Object.values(by).map(o =>
+      `<tr><td>${esc(o.n)}</td><td class="r">${o.c}</td><td class="r">${money(o.f)}</td><td class="r">${money(o.g - o.d)}</td></tr>`).join('') || '<tr><td colspan="4" class="sub">Sin movimientos en este período.</td></tr>'}</table></div>`;
+    const P = C.filter(c => c.estado === 'pendiente');
+    if (P.length) html += `<div class="card"><h3>Consumos para confirmar</h3>${P.map(c =>
+      `<div style="margin-bottom:10px"><b>${esc(c.barbero)}</b>: ${c.cant} × ${esc(c.producto)} (${money(cons(c))})<div class="row" style="margin-top:6px">
+      <button class="ghost" data-a="conf" data-id="${c.id}" data-d="1">Descontar</button><button class="ghost" data-a="conf" data-id="${c.id}" data-d="0">No descontar</button></div></div>`).join('')}</div>`;
+  }
+  html += `<div class="card"><h3>Últimos cortes</h3>${A.length ? A.slice().reverse().slice(0, 25).map(a => `<div style="padding:8px 0;border-bottom:1px solid #2a2a2a">
+    <div class="row"><b>${esc(a.cliente)}</b><span class="r">${money(a.precioCobrado)}${a.modificado ? ' *' : ''}</span></div>
+    <div class="sub">${esc(a.fecha).slice(S.per === 'hoy' ? 11 : 5, 16)} · ${esc(a.servicio)} · ${esc(a.metodo)}${adm ? ' · ' + esc(a.barbero) + ' · ' + a.pct + '%' : ''}</div>
+    ${adm ? `<div class="row" style="margin-top:6px"><button class="ghost" data-a="edit" data-id="${a.id}">Editar</button><button class="ghost" data-a="anu" data-id="${a.id}">Anular</button></div>` : ''}</div>`).join('')
+    : '<p class="sub">Todavía no hay cortes en este período.</p>'}<p class="sub" style="margin-top:8px">* precio distinto al de lista</p></div>`;
+  $('#app').innerHTML = html;
+}
+H.per = d => { S.per = d.v; resView(); };
+H.conf = d => run(async () => { await api('confirmarConsumo', { id: d.id, descontar: d.d === '1' }); resView(); });
+H.anu = d => { if (confirm('¿Anular este corte?')) run(async () => { await api('anular', { id: d.id }); resView(); }); };
+H.edit = d => {
+  const a = S.A.find(x => x.id === d.id);
+  const p = prompt('Precio cobrado', a.precioCobrado); if (p === null) return;
+  const c = prompt('Porcentaje del barbero', a.pct); if (c === null) return;
+  run(async () => { await api('editAtencion', { id: a.id, precio: p, pct: c }); resView(); });
+};
+
+/* ---------- Eventos e inicio ---------- */
+document.addEventListener('click', e => { const b = e.target.closest('[data-a]'); if (b && H[b.dataset.a]) H[b.dataset.a](b.dataset); });
+document.addEventListener('input', e => {
+  if (e.target.id === 'precio') S.precio = e.target.value;
+  if (e.target.id === 'q') { S.q = e.target.value; pintar(); }
+});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+S.t ? start().catch(() => loginView()) : loginView();
+</script>
+</body>
+</html>
