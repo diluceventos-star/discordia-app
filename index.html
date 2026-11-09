@@ -116,7 +116,123 @@ function regView() {
   <h3>Precio cobrado</h3><input id="precio" inputmode="numeric" value="${esc(S.precio)}" placeholder="Precio"></div>
   <div class="card"><h3>Cliente</h3>${S.cli
     ? `<div class="row"><b>${esc(S.cli.nombre)} ${esc(S.cli.apellido)}</b><button class="ghost" data-a="clr">Cambiar</button></div>`
-    : `<input id="q" placeholder="Buscar
+    : `<input id="q" placeholder="Buscar por nombre o apellido" autocomplete="off"><div id="res"></div>
+       <button class="opt" data-a="newcli">+ Nuevo cliente</button>`}</div>
+  <div class="card"><h3>Pago</h3><div class="row">${['Efectivo', 'Transferencia'].map(m =>
+    `<button class="opt ${S.met === m ? 'on' : ''}" data-a="met" data-v="${m}">${m}</button>`).join('')}</div></div>
+  <button class="btn" data-a="save">Guardar corte</button>
+  <details class="card" style="margin-top:14px"><summary>Consumo de la heladera</summary><div class="row" style="flex-wrap:wrap;margin-top:10px">${d.productos.map(p =>
+    `<button class="opt" style="flex:1 1 40%" data-a="prod" data-id="${p.id}">${esc(p.nombre)}<br>${money(p.precio)}</button>`).join('')}</div></details>`;
+  pintar();
+}
+H.svc = d => { S.svc = S.d.servicios.find(s => s.id === d.id); S.precio = S.svc.precio; regView(); };
+H.met = d => { S.met = d.v; regView(); };
+H.clr = () => { S.cli = null; regView(); };
+H.cli = d => { S.cli = S.d.clientes.find(c => c.id === d.id); S.q = ''; regView(); };
+H.save = () => run(async () => {
+  if (!S.svc) throw new Error('Elegí el servicio');
+  if (!S.cli) throw new Error('Elegí o creá un cliente');
+  if (!S.met) throw new Error('Elegí el método de pago');
+  const j = await api('atencion', { servicio: S.svc.id, clienteId: S.cli.id, precio: S.precio, metodo: S.met });
+  toast('Corte guardado', j.a.id);
+  S.svc = S.cli = S.met = null; S.precio = ''; regView();
+});
+H.undo = () => run(async () => { await api('anular', { id: toast.u }); toast('Corte anulado'); });
+H.prod = d => run(async () => { await api('consumo', { producto: d.id, cant: 1 }); toast('Consumo anotado'); });
 
+/* ---------- Clientes ---------- */
+function pintar() {
+  const r = $('#res'); if (!r) return;
+  const q = S.q.toLowerCase().trim();
+  const L = S.d.clientes.filter(c => !q || (c.nombre + ' ' + c.apellido).toLowerCase().includes(q));
+  if (S.tab === 'reg') {
+    r.innerHTML = q ? L.slice(0, 6).map(c => `<button class="opt" data-a="cli" data-id="${c.id}">${esc(c.nombre)} ${esc(c.apellido)}</button>`).join('') : '';
+  } else {
+    r.innerHTML = L.length ? L.map(c => `<div class="card"><b>${esc(c.nombre)} ${esc(c.apellido)}</b>
+      <div class="sub">${esc(c.telefono)} · <a href="https://wa.me/549${String(c.telefono).replace(/^0+/, '')}" target="_blank" rel="noopener">WhatsApp</a>${c.instagram ? ` · <a href="https://instagram.com/${esc(String(c.instagram).replace('@', ''))}" target="_blank" rel="noopener">${esc(c.instagram)}</a>` : ''}</div></div>`).join('')
+      : '<p class="sub">Todavía no hay clientes. Sumá el primero con Nuevo cliente.</p>';
+  }
+}
+function cliView() {
+  $('#app').innerHTML = head('Clientes') + `<input id="q" placeholder="Buscar cliente" autocomplete="off"><button class="btn" data-a="newcli" style="margin-bottom:12px">+ Nuevo cliente</button><div id="res"></div>`;
+  pintar();
+}
+H.newcli = () => {
+  const m = document.createElement('div'); m.className = 'modal'; m.id = 'modal';
+  m.innerHTML = `<div><h2 style="margin-bottom:12px">Nuevo cliente</h2>
+  <input id="n1" placeholder="Nombre"><input id="n2" placeholder="Apellido">
+  <input id="n3" inputmode="tel" placeholder="Teléfono (código de área + número, sin 0 ni 15)">
+  <input id="n4" placeholder="Instagram (opcional)">
+  <div class="row"><button class="ghost" data-a="closem" style="padding:15px">Cancelar</button><button class="btn" data-a="savecli">Guardar cliente</button></div></div>`;
+  document.body.append(m); $('#n1').focus();
+};
+H.closem = () => $('#modal')?.remove();
+H.savecli = () => run(async () => {
+  const j = await api('cliente', { nombre: $('#n1').value, apellido: $('#n2').value, telefono: $('#n3').value, instagram: $('#n4').value });
+  if (!S.d.clientes.find(c => c.id === j.c.id)) S.d.clientes.push(j.c);
+  H.closem(); toast(j.dup ? 'Ese teléfono ya estaba cargado' : 'Cliente guardado');
+  if (S.tab === 'reg') S.cli = j.c;
+  render();
+});
 
+/* ---------- Resumen ---------- */
+async function resView() {
+  const adm = S.me.rol === 'admin', h = hoy();
+  const per = `<div class="row" style="margin-bottom:12px">${[['hoy', 'Hoy'], ['mes', 'Mes'], ['anio', 'Año']].map(([v, l]) =>
+    `<button class="opt ${S.per === v ? 'on' : ''}" data-a="per" data-v="${v}" style="margin:0">${l}</button>`).join('')}</div>`;
+  $('#app').innerHTML = head('Resumen') + per + '<p class="sub">Cargando…</p>';
+  const desde = S.per === 'hoy' ? h : S.per === 'mes' ? h.slice(0, 8) + '01' : h.slice(0, 4) + '-01-01';
+  const j = await run(() => api('datos', { desde, hasta: h })); if (!j) return;
+  const A = j.atenciones.filter(a => a.anulada !== 'si'), C = j.consumos; S.A = A;
+  const cons = c => Number(c.cant) * Number(c.precio);
+  const fact = sum(A, a => a.precioCobrado), gb = sum(A, a => a.gBarbero), gc = sum(A, a => a.gCasa);
+  const efe = sum(A.filter(a => a.metodo === 'Efectivo'), a => a.precioCobrado);
+  const desc = sum(C.filter(c => c.descontar === 'si'), cons), pend = sum(C.filter(c => c.estado === 'pendiente'), cons);
+  let html = head('Resumen') + per + `
+  <div class="card"><div class="sub">Facturado · ${A.length} ${A.length === 1 ? 'corte' : 'cortes'}</div><div class="big">${money(fact)}</div>
+  <div class="row sub" style="margin-top:6px"><span>Efectivo ${money(efe)}</span><span>Transferencia ${money(fact - efe)}</span></div></div>
+  <div class="card"><h3>${adm ? 'Reparto' : 'Mi ganancia'}</h3><table>
+  <tr><td>${adm ? 'Barberos (bruto)' : 'Ganancia bruta'}</td><td class="r">${money(gb)}</td></tr>
+  <tr><td>Consumos descontados</td><td class="r bad">− ${money(desc)}</td></tr>
+  <tr><td><b>${adm ? 'Barberos (neto)' : 'Ganancia neta'}</b></td><td class="r ok"><b>${money(gb - desc)}</b></td></tr>
+  ${adm ? `<tr><td>Casa</td><td class="r">${money(gc + desc)}</td></tr>` : ''}
+  <tr><td class="sub">Consumos sin confirmar</td><td class="r sub">${money(pend)}</td></tr></table></div>`;
+  if (adm) {
+    const by = {};
+    A.forEach(a => { const o = by[a.dni] ??= { n: a.barbero, c: 0, f: 0, g: 0, d: 0 }; o.c++; o.f += Number(a.precioCobrado); o.g += Number(a.gBarbero); });
+    C.filter(c => c.descontar === 'si').forEach(c => { (by[c.dni] ??= { n: c.barbero, c: 0, f: 0, g: 0, d: 0 }).d += cons(c); });
+    html += `<div class="card"><h3>Por barbero</h3><table><tr><th>Barbero</th><th class="r">Cortes</th><th class="r">Factura</th><th class="r">Neto</th></tr>${Object.values(by).map(o =>
+      `<tr><td>${esc(o.n)}</td><td class="r">${o.c}</td><td class="r">${money(o.f)}</td><td class="r">${money(o.g - o.d)}</td></tr>`).join('') || '<tr><td colspan="4" class="sub">Sin movimientos en este período.</td></tr>'}</table></div>`;
+    const P = C.filter(c => c.estado === 'pendiente');
+    if (P.length) html += `<div class="card"><h3>Consumos para confirmar</h3>${P.map(c =>
+      `<div style="margin-bottom:10px"><b>${esc(c.barbero)}</b>: ${c.cant} × ${esc(c.producto)} (${money(cons(c))})<div class="row" style="margin-top:6px">
+      <button class="ghost" data-a="conf" data-id="${c.id}" data-d="1">Descontar</button><button class="ghost" data-a="conf" data-id="${c.id}" data-d="0">No descontar</button></div></div>`).join('')}</div>`;
+  }
+  html += `<div class="card"><h3>Últimos cortes</h3>${A.length ? A.slice().reverse().slice(0, 25).map(a => `<div style="padding:8px 0;border-bottom:1px solid #2a2a2a">
+    <div class="row"><b>${esc(a.cliente)}</b><span class="r">${money(a.precioCobrado)}${a.modificado ? ' *' : ''}</span></div>
+    <div class="sub">${esc(a.fecha).slice(S.per === 'hoy' ? 11 : 5, 16)} · ${esc(a.servicio)} · ${esc(a.metodo)}${adm ? ' · ' + esc(a.barbero) + ' · ' + a.pct + '%' : ''}</div>
+    ${adm ? `<div class="row" style="margin-top:6px"><button class="ghost" data-a="edit" data-id="${a.id}">Editar</button><button class="ghost" data-a="anu" data-id="${a.id}">Anular</button></div>` : ''}</div>`).join('')
+    : '<p class="sub">Todavía no hay cortes en este período.</p>'}<p class="sub" style="margin-top:8px">* precio distinto al de lista</p></div>`;
+  $('#app').innerHTML = html;
+}
+H.per = d => { S.per = d.v; resView(); };
+H.conf = d => run(async () => { await api('confirmarConsumo', { id: d.id, descontar: d.d === '1' }); resView(); });
+H.anu = d => { if (confirm('¿Anular este corte?')) run(async () => { await api('anular', { id: d.id }); resView(); }); };
+H.edit = d => {
+  const a = S.A.find(x => x.id === d.id);
+  const p = prompt('Precio cobrado', a.precioCobrado); if (p === null) return;
+  const c = prompt('Porcentaje del barbero', a.pct); if (c === null) return;
+  run(async () => { await api('editAtencion', { id: a.id, precio: p, pct: c }); resView(); });
+};
 
+/* ---------- Eventos e inicio ---------- */
+document.addEventListener('click', e => { const b = e.target.closest('[data-a]'); if (b && H[b.dataset.a]) H[b.dataset.a](b.dataset); });
+document.addEventListener('input', e => {
+  if (e.target.id === 'precio') S.precio = e.target.value;
+  if (e.target.id === 'q') { S.q = e.target.value; pintar(); }
+});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+S.t ? start().catch(() => loginView()) : loginView();
+</script>
+</body>
+</html>
