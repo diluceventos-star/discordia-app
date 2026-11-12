@@ -121,8 +121,14 @@ function regView() {
   <div class="card"><h3>Pago</h3><div class="row">${['Efectivo', 'Transferencia'].map(m =>
     `<button class="opt ${S.met === m ? 'on' : ''}" data-a="met" data-v="${m}">${m}</button>`).join('')}</div></div>
   <button class="btn" data-a="save">Guardar corte</button>
-  <details class="card" style="margin-top:14px"><summary>Consumo de la heladera</summary><div class="row" style="flex-wrap:wrap;margin-top:10px">${d.productos.map(p =>
-    `<button class="opt" style="flex:1 1 40%" data-a="prod" data-id="${p.id}">${esc(p.nombre)}<br>${money(p.precio)}</button>`).join('')}</div></details>`;
+  <details class="card" style="margin-top:14px">
+    <summary>Anotar consumo / bebida</summary>
+    <div style="margin-top:10px">
+      <input id="descConsumo" placeholder="¿Qué consumió? (Ej: Gaseosa, café)" autocomplete="off">
+      <input id="precioConsumo" inputmode="numeric" placeholder="Precio ($)">
+      <button class="btn" data-a="consumoLibre" style="margin-top:4px;padding:12px">Registrar consumo</button>
+    </div>
+  </details>`;
   pintar();
 }
 H.svc = d => { S.svc = S.d.servicios.find(s => s.id === d.id); S.precio = S.svc.precio; regView(); };
@@ -138,7 +144,19 @@ H.save = () => run(async () => {
   S.svc = S.cli = S.met = null; S.precio = ''; regView();
 });
 H.undo = () => run(async () => { await api('anular', { id: toast.u }); toast('Corte anulado'); });
-H.prod = d => run(async () => { await api('consumo', { producto: d.id, cant: 1 }); toast('Consumo anotado'); });
+
+H.consumoLibre = () => run(async () => {
+  const producto = $('#descConsumo').value;
+  const precio = $('#precioConsumo').value;
+  if (!producto.trim()) throw new Error('Escribí qué consumiste');
+  if (!precio || Number(precio) <= 0) throw new Error('Ingresá un precio válido');
+  
+  await api('consumo', { producto: producto.trim(), precio: Number(precio), cant: 1 });
+  
+  $('#descConsumo').value = '';
+  $('#precioConsumo').value = '';
+  toast('Consumo anotado, pendiente de revisión');
+});
 
 /* ---------- Clientes ---------- */
 function pintar() {
